@@ -5,7 +5,7 @@
   "repository": "facebook/mention-bot",
   "scripts": {
     "test": "flow && jest",
-    "start": "GITHUB_USER=mary-pr-poppins GITHUB_PASSWORD=wC5Oa1skU9wbxeBSXI3QqZ GITHUB_TOKEN=e2cb31b32d44a34ee86a2449dd858e1ece8e28e3 node run-server.js"
+    "start": "node run-server.js"
   },
   "main": "./run-mention-bot.js",
   "engines": {
