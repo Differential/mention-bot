@@ -65,6 +65,7 @@ github.authenticate({
 var app = express();
 
 function buildMentionSentence(reviewers) {
+  if (!reviewers || !reviewers.length) return 'nobody';
   var atReviewers = reviewers.map(function(owner) { return '@' + owner; });
 
   if (reviewers.length === 1) {
@@ -91,8 +92,8 @@ function defaultMessageGenerator(reviewers, pullRequester) {
 
 function configMessageGenerator(message, reviewers, roundRobinReviewers, pullRequester) {
   var withReviewers = message.replace(/@reviewers/g, buildMentionSentence(reviewers));
-  var withRoundRobinReviewers = message.replace(/@roundRobinReviewers/g, buildMentionSentence(roundRobinReviewers));
-  return withReviewers.replace(/@pullRequester/g, pullRequester);
+  var withRoundRobinReviewers = withReviewers.replace(/@roundRobinReviewers/g, buildMentionSentence(roundRobinReviewers));
+  return withRoundRobinReviewers.replace(/@pullRequester/g, pullRequester);
 }
 
 function getRepoConfig(request) {
@@ -134,7 +135,7 @@ async function work(body) {
     fileBlacklist: [],
     requiredOrgs: [],
     findPotentialReviewers: true,
-    actions: ['opened'],
+    actions: ['labeled'],
     branches:[],
     skipAlreadyAssignedPR: false,
     skipAlreadyMentionedPR: false,
@@ -194,6 +195,7 @@ async function work(body) {
       }
     });
     repoConfig = {...repoConfig, ...configRes};
+    console.log('repoConfig', repoConfig);
   } catch (e) {
     if (e.code === 404 &&
         e.message.match(/message.*Not Found.*documentation_url.*developer.github.com/)) {
@@ -212,7 +214,6 @@ async function work(body) {
       return false;
     }
 
-    //  repoConfig.actions = ['opened', 'labeled']; // just for now TODO
     if (repoConfig.actions.indexOf(data.action) === -1) {
       console.log(
         'Skipping because action is "' + data.action + '".',
@@ -250,6 +251,13 @@ async function work(body) {
         data.pull_request.assignee &&
         data.pull_request.assignee.login) {
       console.log('Skipping because pull request is already assigned.');
+      return false;
+    }
+
+    if (repoConfig.skipAlreadyAssignedPR &&
+        data.pull_request.requested_reviewers &&
+        data.pull_request.requested_reviewers.length) {
+      console.log('Skipping because pull request already has a review requested.');
       return false;
     }
 
@@ -302,7 +310,7 @@ async function work(body) {
       data.pull_request.user.login,
       repoConfig,
       github
-    ) || []).slice(0, numRoundRobinReviewers);
+    ) || []).slice(0, repoConfig.numRoundRobinReviewers);
   }
 
   console.log('round robin reviewers', roundRobinReviewers);
@@ -417,6 +425,11 @@ async function work(body) {
     }
   }
 
+  let reviewersToAssign = reviewers;
+  if (roundRobinReviewers.length) {
+    reviewersToAssign = roundRobinReviewers;
+  }
+
   if (repoConfig.delayed) {
     schedule.performAt(schedule.parse(repoConfig.delayedUntil), function(resolve, reject) {
       github.pullRequests.get({
@@ -435,14 +448,14 @@ async function work(body) {
         }
 
         createComment(currentData, message, reject);
-        assignReviewer(currentData, reviewers, reject);
-        requestReview(currentData, reviewers, reject);
+        assignReviewer(currentData, reviewersToAssign, reject);
+        requestReview(currentData, reviewersToAssign, reject);
       });
     });
   } else {
     createComment(data, message);
-    assignReviewer(data, reviewers);
-    requestReview(data, reviewers);
+    assignReviewer(data, reviewersToAssign);
+    requestReview(data, reviewersToAssign);
   }
 
   return;
