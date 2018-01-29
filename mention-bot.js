@@ -15,24 +15,24 @@ var githubAuthCookies = require('./githubAuthCookies');
 var fs = require('fs');
 var minimatch = require('minimatch');
 
-function shuffle(array) {
-  var currentIndex = array.length, temporaryValue, randomIndex;
+// function shuffle(array) {
+//   var currentIndex = array.length, temporaryValue, randomIndex;
 
-  // While there remain elements to shuffle...
-  while (0 !== currentIndex) {
+//   // While there remain elements to shuffle...
+//   while (0 !== currentIndex) {
 
-    // Pick a remaining element...
-    randomIndex = Math.floor(Math.random() * currentIndex);
-    currentIndex -= 1;
+//     // Pick a remaining element...
+//     randomIndex = Math.floor(Math.random() * currentIndex);
+//     currentIndex -= 1;
 
-    // And swap it with the current element.
-    temporaryValue = array[currentIndex];
-    array[currentIndex] = array[randomIndex];
-    array[randomIndex] = temporaryValue;
-  }
+//     // And swap it with the current element.
+//     temporaryValue = array[currentIndex];
+//     array[currentIndex] = array[randomIndex];
+//     array[randomIndex] = temporaryValue;
+//   }
 
-  return array;
-}
+//   return array;
+// }
 
 async function downloadFileAsync(url: string, cookies: ?string): Promise<string> {
   return new Promise(function(resolve, reject) {
@@ -43,7 +43,7 @@ async function downloadFileAsync(url: string, cookies: ?string): Promise<string>
     }
 
     require('child_process')
-      .execFile('curl', args, {encoding: 'utf8', maxBuffer: 1000 * 1024 * 10}, function(error, stdout, stderr) {
+      .execFile('curl', args, {encoding: 'utf8', maxBuffer: 1000 * 1024 * 100}, function(error, stdout, stderr) {
         if (error) {
           reject(error);
         } else {
@@ -255,34 +255,34 @@ async function getDiffForPullRequest(
   });
 }
 
-async function getPRReviewerCounts(
-  owner: string,
-  repo: string,
-  github: Object
-): Promise<object> {
-  const pullRequests = await new Promise(function(resolve, reject) {
-    github.pullRequests.getAll({
-      owner: owner,
-      repo: repo,
-    }, function(err, result) {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(result);
-      }
-    });
-  });
+// async function getPRReviewerCounts(
+//   owner: string,
+//   repo: string,
+//   github: Object
+// ): Promise<object> {
+//   const pullRequests = await new Promise(function(resolve, reject) {
+//     github.pullRequests.getAll({
+//       owner: owner,
+//       repo: repo,
+//     }, function(err, result) {
+//       if (err) {
+//         reject(err);
+//       } else {
+//         resolve(result);
+//       }
+//     });
+//   });
 
-  const reviewers = {};
-  pullRequests.forEach((pullRequest) => {
-    pullRequest.requested_reviewers.forEach((reviewer) => {
-      if (!reviewers[reviewer.login]) reviewers[reviewer.login] = 0;
-      reviewers[reviewer.login] = reviewers[reviewer.login] + 1;
-    });
-  });
+//   const reviewers = {};
+//   pullRequests.forEach((pullRequest) => {
+//     pullRequest.requested_reviewers.forEach((reviewer) => {
+//       if (!reviewers[reviewer.login]) reviewers[reviewer.login] = 0;
+//       reviewers[reviewer.login] = reviewers[reviewer.login] + 1;
+//     });
+//   });
 
-  return reviewers;
-}
+//   return reviewers;
+// }
 
 async function getMatchingOwners(
   files: Array<FileInfo>,
@@ -612,26 +612,49 @@ async function guessOwners(
     });
 }
 
-async function getRoundRobinReviewersForPullRequest(
-  repoURL: string,
-  creator: string,
-  config: object,
-  github: Object
-): Promise<Array<string>> {
-  const ownerAndRepo = repoURL.split('/').slice(-2);
-  const activeReviewers = await getPRReviewerCounts(ownerAndRepo[0], ownerAndRepo[1], github);
-  const allReviewers = {};
+// let robin = 0;
+// async function getRoundRobinReviewersForPullRequest(
+//   repoURL: string,
+//   creator: string,
+//   config: object,
+//   github: Object
+// ): Promise<Array<string>> {
+//   const ownerAndRepo = repoURL.split('/').slice(-2);
 
-  const reviewers = config.reviewers || [];
-  // make sure creator isn't in list
-  if (reviewers.indexOf(creator) > -1) reviewers.splice(reviewers.indexOf(creator), 1);
+//   // list of users that we are allowed to assign issues to
+//   const reviewers = config.reviewers || [];
+//   if (reviewers.indexOf(creator) > -1) reviewers.splice(reviewers.indexOf(creator), 1); // make sure creator isn't in list
 
-  reviewers.forEach(reviewer => allReviewers[reviewer] = 0);
-  Object.keys(activeReviewers).forEach(reviewer => {
-    if (allReviewers.hasOwnProperty(reviewer)) allReviewers[reviewer] = activeReviewers[reviewer];
-  });
-  return shuffle(Object.keys(allReviewers)).sort((a, b) => allReviewers[a] - allReviewers[b]);
-}
+//   // returns an object with the keys as reviewer names, and the values as number of repos they are reviewing,
+//   // ie: { gerard: 5, vincent: 2, conrad: 0 }
+//   const activeReviewers = await getPRReviewerCounts(ownerAndRepo[0], ownerAndRepo[1], github);
+//   console.log('Detected Active Reviewers:', activeReviewers);
+
+//   // convert array of reviewers to pull from into an object, to match up against activeReviewers above
+//   const allReviewers = {};
+//   reviewers.forEach(reviewer => allReviewers[reviewer] = 0);
+
+//   // translate values from activeReviewers to allReviewers
+//   Object.keys(activeReviewers).forEach(reviewer => {
+//     if (allReviewers.hasOwnProperty(reviewer)) allReviewers[reviewer] = activeReviewers[reviewer];
+//   });
+//   console.log('all reviewers', allReviewers);
+
+//   // Get sorted list of reviewers based on how many PRs they are reviewing currently:
+//   const sorted = Object.keys(allReviewers).sort((a, b) => allReviewers[a] - allReviewers[b])
+
+//   // Keep just the low-scores
+//   let low = allReviewers[sorted[0]];
+//   const robins = sorted.filter((name) => allReviewers[name] <= low);
+
+//   // We found our round robbin!
+//   const roundRobin = robin % robins.length;
+//   console.log('robin', robin, roundRobin);
+//   robin = (robin === Number.MAX_VALUE) ? 0 : robin + 1;
+
+//   // Construct a new array that starts at roundRobin
+//   return robins.slice(roundRobin).concat(robins.slice(0, roundRobin));
+// }
 
 async function guessOwnersForPullRequest(
   repoURL: string,
@@ -696,5 +719,5 @@ module.exports = {
   parseDiff: parseDiff,
   parseBlame: parseBlame,
   guessOwnersForPullRequest: guessOwnersForPullRequest,
-  getRoundRobinReviewersForPullRequest: getRoundRobinReviewersForPullRequest,
+  // getRoundRobinReviewersForPullRequest: getRoundRobinReviewersForPullRequest,
 };

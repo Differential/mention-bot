@@ -63,6 +63,7 @@ github.authenticate({
 });
 
 var app = express();
+let robin = null;
 
 function buildMentionSentence(reviewers) {
   if (!reviewers || !reviewers.length) return 'nobody';
@@ -78,6 +79,25 @@ function buildMentionSentence(reviewers) {
   );
 }
 
+function shuffle(array) {
+  var currentIndex = array.length, temporaryValue, randomIndex;
+
+  // While there remain elements to shuffle...
+  while (0 !== currentIndex) {
+
+    // Pick a remaining element...
+    randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex -= 1;
+
+    // And swap it with the current element.
+    temporaryValue = array[currentIndex];
+    array[currentIndex] = array[randomIndex];
+    array[randomIndex] = temporaryValue;
+  }
+
+  return array;
+}
+
 function defaultMessageGenerator(reviewers, pullRequester) {
   return util.format(
     '%s, thanks for your PR! ' +
@@ -90,10 +110,10 @@ function defaultMessageGenerator(reviewers, pullRequester) {
   );
 }
 
-function configMessageGenerator(message, reviewers, roundRobinReviewers, pullRequester) {
+function configMessageGenerator(message, reviewers, randomReviewers, pullRequester) {
   var withReviewers = message.replace(/@reviewers/g, buildMentionSentence(reviewers));
-  var withRoundRobinReviewers = withReviewers.replace(/@roundRobinReviewers/g, buildMentionSentence(roundRobinReviewers));
-  return withRoundRobinReviewers.replace(/@pullRequester/g, pullRequester);
+  var withRandomReviewers = withReviewers.replace(/@randomReviewers/g, buildMentionSentence(randomReviewers));
+  return withRandomReviewers.replace(/@pullRequester/g, pullRequester);
 }
 
 function getRepoConfig(request) {
@@ -120,7 +140,6 @@ async function work(body) {
   var data = {};
   try {
     data = JSON.parse(body.toString());
-    console.log(data.pull_request.html_url);
   } catch (e) {
     console.error(e);
   }
@@ -195,7 +214,6 @@ async function work(body) {
       }
     });
     repoConfig = {...repoConfig, ...configRes};
-    console.log('repoConfig', repoConfig);
   } catch (e) {
     if (e.code === 404 &&
         e.message.match(/message.*Not Found.*documentation_url.*developer.github.com/)) {
@@ -302,19 +320,20 @@ async function work(body) {
     github
   );
 
-  console.log('Reviewers:', reviewers);
-  var roundRobinReviewers = [];
-  if (repoConfig.numRoundRobinReviewers) {
-    roundRobinReviewers = (await mentionBot.getRoundRobinReviewersForPullRequest(
-      data.repository.html_url,
-      data.pull_request.user.login,
-      repoConfig,
-      github
-    ) || []).slice(0, repoConfig.numRoundRobinReviewers);
-  }
+  console.log('guessed reviewers', reviewers);
 
-  console.log('round robin reviewers', roundRobinReviewers);
-  if (roundRobinReviewers.length === 0 && reviewers.length === 0) {
+  let randomReviewers = [];
+  if (repoConfig.numRandomReviewers || repoConfig.numRoundRobinReviewers) {
+    const numReviewers = repoConfig.numRandomReviewers || repoConfig.numRoundRobinReviewers;
+    let randomReviewers = repoConfig.reviewers || [];
+
+    const creator = data.pull_request.user.login;
+    if (randomReviewers.indexOf(creator) > -1) randomReviewers.splice(randomReviewers.indexOf(creator), 1); // make sure creator isn't in list
+
+    randomReviewers = shuffle(randomReviewers).slice(0, numReviewers);
+  }
+  console.log('random reviewers', randomReviewers);
+  if (randomReviewers.length === 0 && reviewers.length === 0) {
     console.log('Skipping because there are no reviewers found.');
     return;
   }
@@ -324,12 +343,12 @@ async function work(body) {
     message = configMessageGenerator(
       repoConfig.message,
       reviewers,
-      roundRobinReviewers,
+      randomReviewers,
       '@' + data.pull_request.user.login
     );
   } else {
     message = messageGenerator(
-      reviewers,
+      owners,
       '@' + data.pull_request.user.login, // pull-requester
       buildMentionSentence,
       defaultMessageGenerator
@@ -426,8 +445,8 @@ async function work(body) {
   }
 
   let reviewersToAssign = reviewers;
-  if (roundRobinReviewers.length) {
-    reviewersToAssign = roundRobinReviewers;
+  if (randomReviewers.length) {
+    reviewersToAssign = randomReviewers;
   }
 
   if (repoConfig.delayed) {
