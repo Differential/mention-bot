@@ -63,8 +63,10 @@ github.authenticate({
 });
 
 var app = express();
+let robin = null;
 
 function buildMentionSentence(reviewers) {
+  if (!reviewers || !reviewers.length) return 'nobody';
   var atReviewers = reviewers.map(function(owner) { return '@' + owner; });
 
   if (reviewers.length === 1) {
@@ -75,6 +77,25 @@ function buildMentionSentence(reviewers) {
     atReviewers.slice(0, atReviewers.length - 1).join(', ') +
     ' and ' + atReviewers[atReviewers.length - 1]
   );
+}
+
+function shuffle(array) {
+  var currentIndex = array.length, temporaryValue, randomIndex;
+
+  // While there remain elements to shuffle...
+  while (0 !== currentIndex) {
+
+    // Pick a remaining element...
+    randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex -= 1;
+
+    // And swap it with the current element.
+    temporaryValue = array[currentIndex];
+    array[currentIndex] = array[randomIndex];
+    array[randomIndex] = temporaryValue;
+  }
+
+  return array;
 }
 
 function defaultMessageGenerator(reviewers, pullRequester) {
@@ -89,9 +110,10 @@ function defaultMessageGenerator(reviewers, pullRequester) {
   );
 }
 
-function configMessageGenerator(message, reviewers, pullRequester) {
+function configMessageGenerator(message, reviewers, randomReviewers, pullRequester) {
   var withReviewers = message.replace(/@reviewers/g, buildMentionSentence(reviewers));
-  return withReviewers.replace(/@pullRequester/g, pullRequester);
+  var withRandomReviewers = withReviewers.replace(/@randomReviewers/g, buildMentionSentence(randomReviewers));
+  return withRandomReviewers.replace(/@pullRequester/g, pullRequester);
 }
 
 function getRepoConfig(request) {
@@ -118,7 +140,6 @@ async function work(body) {
   var data = {};
   try {
     data = JSON.parse(body.toString());
-    console.log(data.pull_request.html_url);
   } catch (e) {
     console.error(e);
   }
@@ -133,7 +154,7 @@ async function work(body) {
     fileBlacklist: [],
     requiredOrgs: [],
     findPotentialReviewers: true,
-    actions: ['opened'],
+    actions: ['labeled'],
     branches:[],
     skipAlreadyAssignedPR: false,
     skipAlreadyMentionedPR: false,
@@ -251,6 +272,13 @@ async function work(body) {
       return false;
     }
 
+    if (repoConfig.skipAlreadyAssignedPR &&
+        data.pull_request.requested_reviewers &&
+        data.pull_request.requested_reviewers.length) {
+      console.log('Skipping because pull request already has a review requested.');
+      return false;
+    }
+
     if (process.env.REQUIRED_ORG) {
       if (repoConfig.requiredOrgs.indexOf(process.env.REQUIRED_ORG) === -1) {
         repoConfig.requiredOrgs.push(process.env.REQUIRED_ORG);
@@ -292,9 +320,20 @@ async function work(body) {
     github
   );
 
-  console.log('Reviewers:', reviewers);
+  console.log('guessed reviewers', reviewers);
 
-  if (reviewers.length === 0) {
+  let randomReviewers = [];
+  if (repoConfig.numRandomReviewers || repoConfig.numRoundRobinReviewers) {
+    const numReviewers = repoConfig.numRandomReviewers || repoConfig.numRoundRobinReviewers;
+    let randomReviewers = repoConfig.reviewers || [];
+
+    const creator = data.pull_request.user.login;
+    if (randomReviewers.indexOf(creator) > -1) randomReviewers.splice(randomReviewers.indexOf(creator), 1); // make sure creator isn't in list
+
+    randomReviewers = shuffle(randomReviewers).slice(0, numReviewers);
+  }
+  console.log('random reviewers', randomReviewers);
+  if (randomReviewers.length === 0 && reviewers.length === 0) {
     console.log('Skipping because there are no reviewers found.');
     return;
   }
@@ -304,11 +343,12 @@ async function work(body) {
     message = configMessageGenerator(
       repoConfig.message,
       reviewers,
+      randomReviewers,
       '@' + data.pull_request.user.login
     );
   } else {
     message = messageGenerator(
-      reviewers,
+      owners,
       '@' + data.pull_request.user.login, // pull-requester
       buildMentionSentence,
       defaultMessageGenerator
@@ -404,6 +444,11 @@ async function work(body) {
     }
   }
 
+  let reviewersToAssign = reviewers;
+  if (randomReviewers.length) {
+    reviewersToAssign = randomReviewers;
+  }
+
   if (repoConfig.delayed) {
     schedule.performAt(schedule.parse(repoConfig.delayedUntil), function(resolve, reject) {
       github.pullRequests.get({
@@ -422,14 +467,14 @@ async function work(body) {
         }
 
         createComment(currentData, message, reject);
-        assignReviewer(currentData, reviewers, reject);
-        requestReview(currentData, reviewers, reject);
+        assignReviewer(currentData, reviewersToAssign, reject);
+        requestReview(currentData, reviewersToAssign, reject);
       });
     });
   } else {
     createComment(data, message);
-    assignReviewer(data, reviewers);
-    requestReview(data, reviewers);
+    assignReviewer(data, reviewersToAssign);
+    requestReview(data, reviewersToAssign);
   }
 
   return;
